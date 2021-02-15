@@ -49,6 +49,7 @@ machine_type = {
 
 
 async def log_state_change(data: Tuple[GeAppliance, Dict[ErdCodeType, Any]]):
+    """Send state changes via UDP if desireable"""
     appliance, state_changes = data
     if not appliance.appliance_type in machine_type:
         return
@@ -81,11 +82,21 @@ async def log_state_change(data: Tuple[GeAppliance, Dict[ErdCodeType, Any]]):
 
     print ("{} : {} {}:{} {}".format(t, machine, config[machine]['host'], config[machine]['port'], msg))
 
+async def do_periodic_update(appliance: GeAppliance):
+    """Request a full state update every hour forever"""
+    while True:
+        await asyncio.sleep(3600)
+        t = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        machine = machine_type[appliance.appliance_type]
+        print("{}: Requesting update of {}".format(t, machine))
+        await appliance.async_request_update()
+
 async def main(loop):
     config = configparser.ConfigParser()
     config.read('ge_websocket_to_udp.ini')
     client = GeWebsocketClient(loop, config['auth']['username'], config['auth']['password'])
     client.add_event_handler(EVENT_APPLIANCE_STATE_CHANGE, log_state_change)
+    client.add_event_handler(EVENT_ADD_APPLIANCE, do_periodic_update)
 
     session = aiohttp.ClientSession()
 
