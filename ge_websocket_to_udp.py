@@ -19,14 +19,13 @@ from gekitchen import (
     EVENT_ADD_APPLIANCE,
     EVENT_APPLIANCE_STATE_CHANGE,
     EVENT_APPLIANCE_INITIAL_UPDATE,
+    EVENT_DISCONNECTED,
     ErdApplianceType,
     ErdCode,
     ErdCodeType,
     ErdOvenCookMode,
     GeAppliance,
-    GeWebsocketClient,
-    OvenCookSetting,
-    OVEN_COOK_MODE_MAP
+    GeWebsocketClient
 )
 
 machine_status = {
@@ -47,6 +46,9 @@ machine_type = {
     ErdApplianceType.WASHER: "WASHER"
 }
 
+
+sleeper = None
+client = None
 
 async def log_state_change(data: Tuple[GeAppliance, Dict[ErdCodeType, Any]]):
     """Send state changes via UDP if desireable"""
@@ -82,29 +84,47 @@ async def log_state_change(data: Tuple[GeAppliance, Dict[ErdCodeType, Any]]):
 
     print ("{} : {} {}:{} {}".format(t, machine, config[machine]['host'], config[machine]['port'], msg))
 
-async def do_periodic_update(appliance: GeAppliance):
-    """Request a full state update every hour forever"""
-    while True:
-        await asyncio.sleep(3600)
-        t = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        machine = machine_type[appliance.appliance_type]
-        print("{}: Requesting update of {}".format(t, machine))
-        await appliance.async_request_update()
+async def do_event_disconnect(appliance: GeAppliance):
+    global sleeper
+    global client
+    print ("Received disconnect...")
+    client.disconnect()
+    sleeper.cancel_all()
+    await sleeper(10)
 
 async def main(loop):
+    global sleeper
+    global client
     config = configparser.ConfigParser()
     config.read('ge_websocket_to_udp.ini')
     client = GeWebsocketClient(loop, config['auth']['username'], config['auth']['password'])
     client.add_event_handler(EVENT_APPLIANCE_STATE_CHANGE, log_state_change)
-    client.add_event_handler(EVENT_ADD_APPLIANCE, do_periodic_update)
+    client.add_event_handler(EVENT_DISCONNECTED, do_event_disconnect)
 
     session = aiohttp.ClientSession()
 
     asyncio.ensure_future(client.async_get_credentials_and_run(session), loop=loop) 
-    await(asyncio.sleep(86400))
+    await sleeper(86400)
+
+def make_sleep():
+    async def sleeper(delay, result=None, *, loop=None):
+        coro = asyncio.sleep(delay, result=result, loop=loop)
+        task = asyncio.ensure_future(coro)
+        sleeper.tasks.add(task)
+        try:
+            return await task
+        except asyncio.CancelledError:
+            return result
+        finally:
+            sleeper.tasks.remove(task)
+
+    sleeper.tasks = set()
+    sleeper.cancel_all = lambda: sum(task.cancel() for task in sleeper.tasks)
+    return sleeper
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
+    sleeper = make_sleep()
     while True:
         try:
             t = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
@@ -114,4 +134,5 @@ if __name__ == '__main__':
             print("Caught exception: {}".format(e))
             pass
 
+        print("loop aborted. Sleeping 300 seconds...")
         time.sleep(300)
