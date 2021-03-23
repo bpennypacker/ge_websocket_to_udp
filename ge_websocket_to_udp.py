@@ -1,19 +1,11 @@
-"""
-Websocket client example
-
-We're going to run the client in a pre-existing event loop.  We're also going to register some event callbacks
-to update appliances every five minutes and to turn on our oven the first time we see it.  Because that is safe!
-"""
+#!/usr/bin/env python3
 
 import aiohttp
 import asyncio
-#import logging
-#from datetime import timedelta
 from typing import Any, Dict, Tuple
 import configparser
 import socket
 import time
-
 
 from gekitchen import (
     EVENT_ADD_APPLIANCE,
@@ -45,7 +37,6 @@ machine_type = {
     ErdApplianceType.DRYER: "DRYER",
     ErdApplianceType.WASHER: "WASHER"
 }
-
 
 class GEWebsocketToUDP:
     def __init__(self):
